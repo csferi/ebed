@@ -206,7 +206,6 @@ if len(data["tagok"]) < 2:
 st.header("📊 Ki kinek mennyivel tartozik?")
 if netto_tartozasok:
     for t in netto_tartozasok:
-        # Nagyobb, formázott betűméret HTML használatával
         formatted_osszeg = f"{t['osszeg']:,}".replace(",", " ")
         st.markdown(
             f"🔴 **{t['kitol']}** tartozik **{t['kinek']}** részére: "
@@ -290,11 +289,24 @@ if data["tranzakciok"]:
         if megjelenitett >= 5:
             break
         
+        formatted_osszeg = f"{tr['osszeg']:,}".replace(",", " ")
+        
         if tr["tipus"] == "ebed" and tr["fizette"] in tagok:
-            st.caption(f"🕒 {tr['datum']} | **{tr['fizette']}** fizetett `{tr['osszeg']:,} Ft`/fő összeget. Résztvevők: {', '.join([r for r in tr['resztvevok'] if r in tagok])}".replace(",", " "))
+            # MÓDOSÍTÁS: st.markdown-t használunk, és az összeget kiemeljük zölddel és félkövérrel a szöveg méretében
+            st.markdown(
+                f"🕒 {tr['datum']} | **{tr['fizette']}** fizetett "
+                f"<span style='color: #2e7d32; font-weight: bold;'>{formatted_osszeg} Ft</span>/fő összeget. "
+                f"Résztvevők: {', '.join([r for r in tr['resztvevok'] if r in tagok])}",
+                unsafe_allow_html=True
+            )
             megjelenitett += 1
         elif tr["tipus"] == "torles" and tr["kitol"] in tagok and tr["kinek"] in tagok:
-            st.caption(f"🕒 {tr['datum']} | 💸 **{tr['kitol']}** megadta a tartozását **{tr['kinek']}** részére (`{tr['osszeg']:,} Ft`)".replace(",", " "))
+            # MÓDOSÍTÁS: Ugyanaz a zöld-félkövér stílus a tartozás-visszafizetésnél is
+            st.markdown(
+                f"🕒 {tr['datum']} | 💸 **{tr['kitol']}** megadta a tartozását **{tr['kinek']}** részére "
+                f"(<span style='color: #2e7d32; font-weight: bold;'>{formatted_osszeg} Ft</span>)",
+                unsafe_allow_html=True
+            )
             megjelenitett += 1
             
     # --- Összes adat törlése biztonsági kódos e-mail küldéssel ---
