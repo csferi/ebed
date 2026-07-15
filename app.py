@@ -133,7 +133,8 @@ for tr in data["tranzakciok"]:
         if fizette in matrix and resztvevok:
             ervenyes_resztvevok = [r for r in resztvevok if r in matrix]
             if ervenyes_resztvevok:
-                resz_osszeg = tr["osszeg"] / len(ervenyes_resztvevok)
+                # MÓDOSÍTÁS: Az összeg most már közvetlenül adódik hozzá minden résztvevőhöz külön-külön
+                resz_osszeg = tr["osszeg"] 
                 for r in ervenyes_resztvevok:
                     if r != fizette:
                         matrix[r][fizette] += resz_osszeg
@@ -219,10 +220,9 @@ with col1:
     st.subheader("🍱 Új ebéd beírása")
     with st.form("ebed_form", clear_on_submit=True):
         fizette = st.selectbox("Ki fizetett?", tagok)
-        osszeg = st.number_input("Összeg (Ft):", min_value=0, step=100)
-        # 1. Módosítás: default=[] -> nincs alapértelmezett kiválasztott
+        # Az "Összeg" címkéjét is pontosítottam, hogy egyértelmű legyen
+        osszeg = st.number_input("Adag ára / Fő (Ft):", min_value=0, step=100)
         resztvevok = st.multiselect("Kiknek hozott ebédet? (A fizetőt is jelöld be!)", tagok, default=[])
-        # 2. Módosítás: Naptár modul
         ebed_datum = st.date_input("Mikor történt?", value=date.today())
         
         if st.form_submit_button("Ebéd rögzítése"):
@@ -231,6 +231,7 @@ with col1:
                     "id": datetime.now().timestamp(),
                     "tipus": "ebed",
                     "fizette": fizette,
+                    # Továbbra is az egy adag árát mentjük el, de a számolásnál már nem osztjuk el
                     "osszeg": osszeg,
                     "resztvevok": resztvevok,
                     "kitol": "",
@@ -255,7 +256,6 @@ with col2:
                 aktualis_visszafizetendo = nt["osszeg"]
         
         st.caption(f"Aktuális tartozás ({kitol} -> {kinek}): {aktualis_visszafizetendo:,} Ft".replace(",", " "))
-        # 2. Módosítás: Naptár modul tartozásrendezéshez is
         torles_datum = st.date_input("Mikor történt a rendezés?", value=date.today())
         
         if st.form_submit_button("Tartozás nullázása / rendezése"):
@@ -288,29 +288,26 @@ if data["tranzakciok"]:
             break
         
         if tr["tipus"] == "ebed" and tr["fizette"] in tagok:
-            st.caption(f"🕒 {tr['datum']} | **{tr['fizette']}** fizetett `{tr['osszeg']:,} Ft`-ot. Résztvevők: {', '.join([r for r in tr['resztvevok'] if r in tagok])}".replace(",", " "))
+            # Az előzményeknél is tisztázzuk a megjelenítést (megmutatjuk, hogy ez fejenkénti adag)
+            st.caption(f"🕒 {tr['datum']} | **{tr['fizette']}** fizetett `{tr['osszeg']:,} Ft`/fő összeget. Résztvevők: {', '.join([r for r in tr['resztvevok'] if r in tagok])}".replace(",", " "))
             megjelenitett += 1
         elif tr["tipus"] == "torles" and tr["kitol"] in tagok and tr["kinek"] in tagok:
             st.caption(f"🕒 {tr['datum']} | 💸 **{tr['kitol']}** megadta a tartozását **{tr['kinek']}** részére (`{tr['osszeg']:,} Ft`)".replace(",", " "))
             megjelenitett += 1
             
-    # --- 3. Módosítás: Összes adat törlése biztonsági kódos e-mail küldéssel ---
+    # --- Összes adat törlése biztonsági kódos e-mail küldéssel ---
     st.subheader("⚠️ Veszélyes zóna")
     
-    # Ha nincs még aktív folyamat, mutassuk az indító gombot
     if "delete_verification_code" not in st.session_state:
         if st.button("🗑️ Összes adat törlése (Alaphelyzet)", type="primary"):
-            # Generálunk egy 6 jegyű kódot
             code = str(random.randint(100000, 999999))
             st.session_state.delete_verification_code = code
             
-            # Elküldjük az e-mailt
             with st.spinner("Ellenőrző kód küldése a cser.ferenc@dentalplus.hu címre..."):
                 if send_verification_email(code):
                     st.success("Az ellenőrző kódot sikeresen elküldtük!")
                     st.rerun()
     else:
-        # Ha a kód már ki lett küldve, bekérjük
         st.warning("Biztonsági megerősítés szükséges!")
         beirt_kod = st.text_input("Írd be a cser.ferenc@dentalplus.hu címre küldött 6 jegyű ellenőrző kódot:", value="")
         
