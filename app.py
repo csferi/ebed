@@ -36,7 +36,7 @@ def load_data_from_sheets():
         sheet_tagok.update("A1:A" + str(len(default_tagok)), [[t] for t in default_tagok])
         tagok_raw = default_tagok
     
-    # 2. Tranzakciók betöltése (Bombabiztos, get_all_records-mentes megoldás)
+    # 2. Tranzakciók betöltése
     rows = sheet_tranzakciok.get_all_values()
     fejlecek = ["id", "tipus", "fizette", "osszeg", "resztvevok", "kitol", "kinek", "datum"]
     
@@ -57,21 +57,23 @@ def load_data_from_sheets():
         row_dict = dict(zip(fejlecek, row_data))
         
         # Csak akkor adjuk hozzá, ha van érvényes ID
-        if row_dict.get("id"):
+        valodi_id = row_dict.get("id", "").strip()
+        if valodi_id:
             try:
                 # Feldolgozzuk a listát a résztvevőknél
-                resztvevok_str = row_dict.get("resztvevok", "[]")
+                resztvevok_str = row_dict.get("resztvevok", "[]").strip()
                 resztvevok_list = json.loads(resztvevok_str) if resztvevok_str else []
                 
+                # Típuskonverziók a biztonságos számoláshoz
                 tranzakciok.append({
-                    "id": float(row_dict["id"]),
-                    "tipus": row_dict.get("tipus", ""),
-                    "fizette": row_dict.get("fizette", ""),
-                    "osszeg": int(row_dict["osszeg"]) if row_dict.get("osszeg") else 0,
-                    "resztvevok": resztvevok_list,
-                    "kitol": row_dict.get("kitol", ""),
-                    "kinek": row_dict.get("kinek", ""),
-                    "datum": row_dict.get("datum", "")
+                    "id": float(valodi_id),
+                    "tipus": str(row_dict.get("tipus", "")).strip(),
+                    "fizette": str(row_dict.get("fizette", "")).strip(),
+                    "osszeg": float(row_dict.get("osszeg")) if row_dict.get("osszeg") else 0.0,
+                    "resztvevok": [str(x).strip() for x in resztvevok_list],
+                    "kitol": str(row_dict.get("kitol", "")).strip(),
+                    "kinek": str(row_dict.get("kinek", "")).strip(),
+                    "datum": str(row_dict.get("datum", "")).strip()
                 })
             except Exception:
                 # Hibás sorokat egyszerűen átugorjuk, hogy ne omoljon össze az app
@@ -187,7 +189,7 @@ with st.sidebar:
         st.write("Nincs törölhető tag.")
 
 if len(data["tagok"]) < 2:
-    st.warning("Kérjük, vigyél fel legalább 2 tagot az oldalsávban a működéshez!")
+    st.warning("Kérjük, vigyél fel least 2 tagot az oldalsávban a működéshez!")
     st.stop()
 
 # --- 2. FŐPANEL: Aktuális egyenlegek ---
