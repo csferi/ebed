@@ -206,10 +206,11 @@ if len(data["tagok"]) < 2:
 st.header("📊 Ki kinek mennyivel tartozik?")
 if netto_tartozasok:
     for t in netto_tartozasok:
+        # A betűtípus és méret teljesen azonos a szöveggel (öröklődik), csak félkövér és piros
         formatted_osszeg = f"{t['osszeg']:,}".replace(",", " ")
         st.markdown(
             f"🔴 **{t['kitol']}** tartozik **{t['kinek']}** részére: "
-            f"<span style='font-size: 22px; font-weight: bold; color: #ff4b4b; background-color: #ffebeb; padding: 2px 8px; border-radius: 5px;'>{formatted_osszeg} Ft</span>", 
+            f"<span style='color: #ff4b4b; font-weight: bold;'>{formatted_osszeg} Ft</span>", 
             unsafe_allow_html=True
         )
 else:
@@ -292,7 +293,7 @@ if data["tranzakciok"]:
         formatted_osszeg = f"{tr['osszeg']:,}".replace(",", " ")
         
         if tr["tipus"] == "ebed" and tr["fizette"] in tagok:
-            # MÓDOSÍTÁS: st.markdown-t használunk, és az összeget kiemeljük zölddel és félkövérrel a szöveg méretében
+            # Az összeg mérete és betűtípusa megegyezik a szöveggel, de félkövér és zöld színű
             st.markdown(
                 f"🕒 {tr['datum']} | **{tr['fizette']}** fizetett "
                 f"<span style='color: #2e7d32; font-weight: bold;'>{formatted_osszeg} Ft</span>/fő összeget. "
@@ -301,7 +302,7 @@ if data["tranzakciok"]:
             )
             megjelenitett += 1
         elif tr["tipus"] == "torles" and tr["kitol"] in tagok and tr["kinek"] in tagok:
-            # MÓDOSÍTÁS: Ugyanaz a zöld-félkövér stílus a tartozás-visszafizetésnél is
+            # Szintén azonos méretű, de félkövér és zöld kiemelés
             st.markdown(
                 f"🕒 {tr['datum']} | 💸 **{tr['kitol']}** megadta a tartozását **{tr['kinek']}** részére "
                 f"(<span style='color: #2e7d32; font-weight: bold;'>{formatted_osszeg} Ft</span>)",
