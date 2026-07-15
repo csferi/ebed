@@ -206,7 +206,7 @@ if len(data["tagok"]) < 2:
 st.header("📊 Ki kinek mennyivel tartozik?")
 if netto_tartozasok:
     for t in netto_tartozasok:
-        # VISSZAÁLLÍTVA: Nagy, kiemelt, pirosas hátterű kártya dizájn az egyenleghez
+        # A kiemelt piros doboz megmarad, mert ez asztali gépen és mobilon is kiválóan látszik
         formatted_osszeg = f"{t['osszeg']:,}".replace(",", " ")
         st.markdown(
             f"🔴 **{t['kitol']}** tartozik **{t['kinek']}** részére: "
@@ -293,20 +293,18 @@ if data["tranzakciok"]:
         formatted_osszeg = f"{tr['osszeg']:,}".replace(",", " ")
         
         if tr["tipus"] == "ebed" and tr["fizette"] in tagok:
-            # Utolsó tranzakcióknál az összeg mérete azonos a szöveggel, nincs háttér, de félkövér és zöld
+            # HTML helyett natív Markdown színezés (:green[szöveg]) és félkövérítés (**szöveg**)
+            # Ez garantálja, hogy mobilon is tökéletesen az alapértelmezett betűtípust használja a rendszer!
             st.markdown(
                 f"🕒 {tr['datum']} | **{tr['fizette']}** fizetett "
-                f"<span style='color: #2e7d32; font-weight: bold;'>{formatted_osszeg} Ft</span>/fő összeget. "
-                f"Résztvevők: {', '.join([r for r in tr['resztvevok'] if r in tagok])}",
-                unsafe_allow_html=True
+                f"**:green[{formatted_osszeg} Ft]**/fő összeget. "
+                f"Résztvevők: {', '.join([r for r in tr['resztvevok'] if r in tagok])}"
             )
             megjelenitett += 1
         elif tr["tipus"] == "torles" and tr["kitol"] in tagok and tr["kinek"] in tagok:
-            # Szintén azonos méretű szöveg, félkövér és zöld kiemeléssel
             st.markdown(
                 f"🕒 {tr['datum']} | 💸 **{tr['kitol']}** megadta a tartozását **{tr['kinek']}** részére "
-                f"(<span style='color: #2e7d32; font-weight: bold;'>{formatted_osszeg} Ft</span>)",
-                unsafe_allow_html=True
+                f"(**:green[{formatted_osszeg} Ft]**)"
             )
             megjelenitett += 1
             
