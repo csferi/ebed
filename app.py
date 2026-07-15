@@ -27,36 +27,56 @@ except Exception as e:
 
 # --- Adatok szinkronizálása a Google Táblázattal ---
 def load_data_from_sheets():
-    # Tagok betöltése (Első oszlop)
+    # 1. Tagok betöltése (Első oszlop)
     tagok_raw = sheet_tagok.col_values(1)
+    # Kiszűrjük az esetleges üres sorokat
+    tagok_raw = [t.strip() for t in tagok_raw if t and str(t).strip()]
     if not tagok_raw:
         default_tagok = ["Anna", "Balázs", "Gábor", "Dóra"]
         sheet_tagok.update("A1:A" + str(len(default_tagok)), [[t] for t in default_tagok])
         tagok_raw = default_tagok
     
-    # Biztonsági ellenőrzés a Tranzakciókhoz: Ha teljesen üres a lap, létrehozzuk a fejlécet
-    elsosor = sheet_tranzakciok.row_values(1)
+    # 2. Tranzakciók betöltése (Bombabiztos, get_all_records-mentes megoldás)
+    rows = sheet_tranzakciok.get_all_values()
     fejlecek = ["id", "tipus", "fizette", "osszeg", "resztvevok", "kitol", "kinek", "datum"]
-    if not elsosor:
+    
+    # Ha teljesen üres a munkalap, vagy nincs benne fejléc, létrehozzuk és lementjük
+    if not rows or not rows[0] or rows[0][0].strip() != "id":
+        sheet_tranzakciok.clear()
         sheet_tranzakciok.append_row(fejlecek)
-    
-    # Tranzakciók betöltése
-    tranzakciok_raw = sheet_tranzakciok.get_all_records()
+        rows = [fejlecek]
+        
     tranzakciok = []
-    for row in tranzakciok_raw:
-        # Csak akkor dolgozzuk fel, ha érvényes sor (van id-ja)
-        if row.get("id"):
-            tranzakciok.append({
-                "id": float(row["id"]),
-                "tipus": row["tipus"],
-                "fizette": row["fizette"],
-                "osszeg": int(row["osszeg"]) if row["osszeg"] else 0,
-                "resztvevok": json.loads(row["resztvevok"]) if row["resztvevok"] else [],
-                "kitol": row["kitol"],
-                "kinek": row["kinek"],
-                "datum": row["datum"]
-            })
     
+    # Az első sor a fejléc, a többit feldolgozzuk
+    for r in rows[1:]:
+        # Ha a sor rövidebb mint a fejléc, kiegészítjük üres stringekkel
+        row_data = r + [""] * (len(fejlecek) - len(r))
+        
+        # Létrehozzuk a kulcs-érték párokat
+        row_dict = dict(zip(fejlecek, row_data))
+        
+        # Csak akkor adjuk hozzá, ha van érvényes ID
+        if row_dict.get("id"):
+            try:
+                # Feldolgozzuk a listát a résztvevőknél
+                resztvevok_str = row_dict.get("resztvevok", "[]")
+                resztvevok_list = json.loads(resztvevok_str) if resztvevok_str else []
+                
+                tranzakciok.append({
+                    "id": float(row_dict["id"]),
+                    "tipus": row_dict.get("tipus", ""),
+                    "fizette": row_dict.get("fizette", ""),
+                    "osszeg": int(row_dict["osszeg"]) if row_dict.get("osszeg") else 0,
+                    "resztvevok": resztvevok_list,
+                    "kitol": row_dict.get("kitol", ""),
+                    "kinek": row_dict.get("kinek", ""),
+                    "datum": row_dict.get("datum", "")
+                })
+            except Exception:
+                # Hibás sorokat egyszerűen átugorjuk, hogy ne omoljon össze az app
+                continue
+                
     return {"tagok": tagok_raw, "tranzakciok": tranzakciok}
 
 def save_tagok_to_sheets(tagok):
