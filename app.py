@@ -1,30 +1,86 @@
 import streamlit as st
 import json
-import os
 from datetime import datetime
+from google.oauth2.service_account import Credentials
+import gspread
 
-# Adatfájl útvonala
-DATA_FILE = "ebed_adatok.json"
+# --- Google Sheets Kapcsolat beállítása ---
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
 
-# Adatszerkezet betöltése/létrehozása
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"tagok": ["Anna", "Balázs", "Gábor", "Dóra"], "tranzakciok": []}
+try:
+    # Betöltjük a titkosított kulcsokat a Streamlit Secrets-ből
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    gc = gspread.authorize(creds)
+    
+    # FIGYELEM: Cseréld ki az alábbi nevet a saját Google Táblázatod pontos nevére!
+    sh = gc.open("Ebed_Nyilvantarto")
+    sheet_tagok = sh.worksheet("Tagok")
+    sheet_tranzakciok = sh.worksheet("Tranzakciok")
+except Exception as e:
+    st.error("Hiba történt a Google Táblázat elérésekor. Kérlek ellenőrizd a beállításokat és a Secrets-t!")
+    st.exception(e)
+    st.stop()
 
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+# --- Adatok szinkronizálása a Google Táblázattal ---
+def load_data_from_sheets():
+    # Tagok betöltése
+    tagok_raw = sheet_tagok.col_values(1)
+    if not tagok_raw:
+        default_tagok = ["Anna", "Balázs", "Gábor", "Dóra"]
+        sheet_tagok.update("A1:A" + str(len(default_tagok)), [[t] for t in default_tagok])
+        tagok_raw = default_tagok
+    
+    # Tranzakciók betöltése
+    tranzakciok_raw = sheet_tranzakciok.get_all_records()
+    tranzakciok = []
+    for row in tranzakciok_raw:
+        tranzakciok.append({
+            "id": float(row["id"]),
+            "tipus": row["tipus"],
+            "fizette": row["fizette"],
+            "osszeg": int(row["osszeg"]),
+            "resztvevok": json.loads(row["resztvevok"]) if row["resztvevok"] else [],
+            "kitol": row["kitol"],
+            "kinek": row["kinek"],
+            "datum": row["datum"]
+        })
+    
+    return {"tagok": tagok_raw, "tranzakciok": tranzakciok}
 
-if "data" not in st.session_state:
-    st.session_state.data = load_data()
+def save_tagok_to_sheets(tagok):
+    sheet_tagok.clear()
+    if tagok:
+        sheet_tagok.update("A1:A" + str(len(tagok)), [[t] for t in tagok])
 
-data = st.session_state.data
+def add_tranzakcio_to_sheets(tr):
+    sor = [
+        tr.get("id", ""),
+        tr.get("tipus", ""),
+        tr.get("fizette", ""),
+        tr.get("osszeg", 0),
+        json.dumps(tr.get("resztvevok", [])),
+        tr.get("kitol", ""),
+        tr.get("kinek", ""),
+        tr.get("datum", "")
+    ]
+    sheet_tranzakciok.append_row(sor)
+
+def clear_all_tranzakciok_on_sheets():
+    sheet_tranzakciok.clear()
+    fejlecek = ["id", "tipus", "fizette", "osszeg", "resztvevok", "kitol", "kinek", "datum"]
+    sheet_tranzakciok.append_row(fejlecek)
+
+# --- Adatok betöltése ---
+data = load_data_from_sheets()
 
 st.title("🍔 Munkahelyi Ebéd Elszámoló")
+st.caption("🔒 Biztonságos Google Cloud háttértárral szinkronizálva")
 
-# --- Tartozások kiszámítása (Mátrix logika - a törlés ellenőrzéséhez előre kell hoznunk) ---
+# --- Tartozások kiszámítása (Mátrix logika) ---
 tagok = data["tagok"]
 matrix = {t1: {t2: 0.0 for t2 in tagok} for t1 in tagok}
 
@@ -32,7 +88,6 @@ for tr in data["tranzakciok"]:
     if tr["tipus"] == "ebed":
         fizette = tr["fizette"]
         resztvevok = tr["resztvevok"]
-        # Csak akkor vesszük figyelembe a tranzakciót, ha a szereplői még létező tagok
         if fizette in matrix and resztvevok:
             ervenyes_resztvevok = [r for r in resztvevok if r in matrix]
             if ervenyes_resztvevok:
@@ -65,51 +120,47 @@ for i in range(len(tagok)):
         elif egyenleg < -1:
             netto_tartozasok.append({"kitol": t2, "kinek": t1, "osszeg": round(abs(egyenleg))})
 
-# Segédfüggvény: Ellenőrzi, hogy egy tagnak van-e bármilyen aktív tartozása vagy követelése
+# Segédfüggvény tartozás ellenőrzéséhez
 def van_tartozasa(tag):
     for nt in netto_tartozasok:
         if nt["kitol"] == tag or nt["kinek"] == tag:
             return True
     return False
 
-
-# --- 1. OLDALSÁV: Tagok hozzáadása és KÖNNYŰ TÖRLÉSE ---
+# --- 1. OLDALSÁV: Tagok kezelése ---
 with st.sidebar:
     st.header("👥 Csapattagok kezelése")
     
-    # Hozzáadás
+    # Tag hozzáadása
     uj_tag = st.text_input("Új tag hozzáadása:")
     if st.button("➕ Hozzáadás") and uj_tag:
-        if uj_tag not in data["tagok"]:
-            data["tagok"].append(uj_tag)
-            save_data(data)
-            st.success(f"{uj_tag} hozzáadva!")
+        uj_tag_clean = uj_tag.strip()
+        if uj_tag_clean and uj_tag_clean not in data["tagok"]:
+            data["tagok"].append(uj_tag_clean)
+            save_tagok_to_sheets(data["tagok"])
+            st.success(f"{uj_tag_clean} hozzáadva!")
             st.rerun()
             
     st.divider()
     
-    # Törlés
+    # Könnyű és biztonságos törlés
     st.subheader("Személy eltávolítása")
     if data["tagok"]:
         torlendo_tag = st.selectbox("Ki távozik?", data["tagok"])
         if st.button("❌ Tag törlése", type="primary"):
             if van_tartozasa(torlendo_tag):
-                st.error(f"**{torlendo_tag}** nem törölhető, mert még van aktív elszámolatlan tartozása vagy követelése! Előbb nullázzátok az egyenlegét.")
+                st.error(f"**{torlendo_tag}** nem törölhető, mert még van elszámolatlan egyenlege! Előbb nullázzátok a tartozását.")
             else:
                 data["tagok"].remove(torlendo_tag)
-                # Opcionális finomítás: megtisztítjuk a régi tranzakciós előzményeket a törölt tagtól,
-                # hogy ne foglalja a helyet feleslegesen, ha már nullán volt.
-                save_data(data)
+                save_tagok_to_sheets(data["tagok"])
                 st.success(f"{torlendo_tag} sikeresen törölve!")
                 st.rerun()
     else:
         st.write("Nincs törölhető tag.")
 
-
 if len(data["tagok"]) < 2:
     st.warning("Kérjük, vigyél fel legalább 2 tagot az oldalsávban a működéshez!")
     st.stop()
-
 
 # --- 2. FŐPANEL: Aktuális egyenlegek ---
 st.header("📊 Ki kinek mennyivel tartozik?")
@@ -121,7 +172,6 @@ else:
 
 st.divider()
 
-
 # --- 3. ŰRLAPOK: Új események rögzítése ---
 col1, col2 = st.columns(2)
 
@@ -130,7 +180,7 @@ with col1:
     with st.form("ebed_form", clear_on_submit=True):
         fizette = st.selectbox("Ki fizetett?", tagok)
         osszeg = st.number_input("Összeg (Ft):", min_value=0, step=100)
-        resztvevok = st.multiselect("Kiknek hozott ebédet? (A fizetőt is jelöld be, ha evett!)", tagok, default=[fizette])
+        resztvevok = st.multiselect("Kiknek hozott ebédet? (A fizetőt is jelöld be!)", tagok, default=[fizette])
         
         if st.form_submit_button("Ebéd rögzítése"):
             if osszeg > 0 and resztvevok:
@@ -140,11 +190,12 @@ with col1:
                     "fizette": fizette,
                     "osszeg": osszeg,
                     "resztvevok": resztvevok,
+                    "kitol": "",
+                    "kinek": "",
                     "datum": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
-                data["tranzakciok"].append(uj_tr)
-                save_data(data)
-                st.success("Ebéd elmentve!")
+                add_tranzakcio_to_sheets(uj_tr)
+                st.success("Ebéd elmentve a Google Táblázatba!")
                 st.rerun()
             else:
                 st.error("Kérjük, adj meg összeget és válaszd ki a résztvevőket!")
@@ -171,22 +222,21 @@ with col2:
                 uj_tr = {
                     "id": datetime.now().timestamp(),
                     "tipus": "torles",
+                    "fizette": "",
+                    "osszeg": aktualis_visszafizetendo,
+                    "resztvevok": [],
                     "kitol": kitol,
                     "kinek": kinek,
-                    "osszeg": aktualis_visszafizetendo,
                     "datum": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
-                data["tranzakciok"].append(uj_tr)
-                save_data(data)
+                add_tranzakcio_to_sheets(uj_tr)
                 st.success(f"{kitol} -> {kinek} tartozás rendezve!")
                 st.rerun()
-
 
 # --- 4. Előzmények ---
 st.divider()
 st.subheader("📜 Utolsó tranzakciók")
 if data["tranzakciok"]:
-    # Csak azokat a tranzakciókat mutatjuk, ahol a szereplők még léteznek (nem lettek törölve)
     megjelenitett = 0
     for tr in reversed(data["tranzakciok"]):
         if megjelenitett >= 5:
@@ -200,7 +250,6 @@ if data["tranzakciok"]:
             megjelenitett += 1
             
     if st.button("🗑️ Összes adat törlése (Alaphelyzet)"):
-        data["tranzakciok"] = []
-        save_data(data)
-        st.success("Minden adat törölve!")
+        clear_all_tranzakciok_on_sheets()
+        st.success("Minden adat törölve a Google Táblázatból!")
         st.rerun()
