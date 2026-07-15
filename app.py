@@ -1,6 +1,9 @@
 import streamlit as st
 import json
-from datetime import datetime
+import random
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime, date
 from google.oauth2.service_account import Credentials
 import gspread
 
@@ -29,7 +32,6 @@ except Exception as e:
 def load_data_from_sheets():
     # 1. Tagok betöltése (Első oszlop)
     tagok_raw = sheet_tagok.col_values(1)
-    # Kiszűrjük az esetleges üres sorokat
     tagok_raw = [t.strip() for t in tagok_raw if t and str(t).strip()]
     if not tagok_raw:
         default_tagok = ["Anna", "Balázs", "Gábor", "Dóra"]
@@ -40,7 +42,6 @@ def load_data_from_sheets():
     rows = sheet_tranzakciok.get_all_values()
     fejlecek = ["id", "tipus", "fizette", "osszeg", "resztvevok", "kitol", "kinek", "datum"]
     
-    # Ha teljesen üres a munkalap, vagy nincs benne fejléc, létrehozzuk és lementjük
     if not rows or not rows[0] or rows[0][0].strip() != "id":
         sheet_tranzakciok.clear()
         sheet_tranzakciok.append_row(fejlecek)
@@ -48,23 +49,16 @@ def load_data_from_sheets():
         
     tranzakciok = []
     
-    # Az első sor a fejléc, a többit feldolgozzuk
     for r in rows[1:]:
-        # Ha a sor rövidebb mint a fejléc, kiegészítjük üres stringekkel
         row_data = r + [""] * (len(fejlecek) - len(r))
-        
-        # Létrehozzuk a kulcs-érték párokat
         row_dict = dict(zip(fejlecek, row_data))
-        
-        # Csak akkor adjuk hozzá, ha van érvényes ID
         valodi_id = row_dict.get("id", "").strip()
+        
         if valodi_id:
             try:
-                # Feldolgozzuk a listát a résztvevőknél
                 resztvevok_str = row_dict.get("resztvevok", "[]").strip()
                 resztvevok_list = json.loads(resztvevok_str) if resztvevok_str else []
                 
-                # Típuskonverziók a biztonságos számoláshoz
                 tranzakciok.append({
                     "id": float(valodi_id),
                     "tipus": str(row_dict.get("tipus", "")).strip(),
@@ -76,7 +70,6 @@ def load_data_from_sheets():
                     "datum": str(row_dict.get("datum", "")).strip()
                 })
             except Exception:
-                # Hibás sorokat egyszerűen átugorjuk, hogy ne omoljon össze az app
                 continue
                 
     return {"tagok": tagok_raw, "tranzakciok": tranzakciok}
@@ -103,6 +96,25 @@ def clear_all_tranzakciok_on_sheets():
     sheet_tranzakciok.clear()
     fejlecek = ["id", "tipus", "fizette", "osszeg", "resztvevok", "kitol", "kinek", "datum"]
     sheet_tranzakciok.append_row(fejlecek)
+
+# --- E-mail küldő segédfüggvény az ellenőrzőkódhoz ---
+def send_verification_email(code):
+    try:
+        conf = st.secrets["email"]
+        msg = MIMEText(f"Szia Ferenc!\n\nAz ebédelszámoló alkalmazásban valaki kezdeményezte az összes tranzakció törlését.\n\nAz ellenőrző kód: {code}\n\nHa nem te indítottad a folyamatot, hagyd figyelmen kívül ezt a levelet!")
+        msg["Subject"] = "Ebéd Elszámoló - Biztonsági törlési kód"
+        msg["From"] = conf["sender_email"]
+        msg["To"] = "cser.ferenc@dentalplus.hu"
+        
+        server = smtplib.SMTP(conf["smtp_server"], conf["smtp_port"])
+        server.starttls()
+        server.login(conf["sender_email"], conf["sender_password"])
+        server.sendmail(conf["sender_email"], ["cser.ferenc@dentalplus.hu"], msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        st.error(f"Nem sikerült elküldeni az e-mailt: {e}")
+        return False
 
 # --- Adatok betöltése ---
 data = load_data_from_sheets()
@@ -161,7 +173,6 @@ def van_tartozasa(tag):
 with st.sidebar:
     st.header("👥 Csapattagok kezelése")
     
-    # Tag hozzáadása
     uj_tag = st.text_input("Új tag hozzáadása:")
     if st.button("➕ Hozzáadás") and uj_tag:
         uj_tag_clean = uj_tag.strip()
@@ -173,7 +184,6 @@ with st.sidebar:
             
     st.divider()
     
-    # Könnyű és biztonságos törlés
     st.subheader("Személy eltávolítása")
     if data["tagok"]:
         torlendo_tag = st.selectbox("Ki távozik?", data["tagok"])
@@ -189,7 +199,7 @@ with st.sidebar:
         st.write("Nincs törölhető tag.")
 
 if len(data["tagok"]) < 2:
-    st.warning("Kérjük, vigyél fel least 2 tagot az oldalsávban a működéshez!")
+    st.warning("Kérjük, vigyél fel legalább 2 tagot az oldalsávban a működéshez!")
     st.stop()
 
 # --- 2. FŐPANEL: Aktuális egyenlegek ---
@@ -210,7 +220,10 @@ with col1:
     with st.form("ebed_form", clear_on_submit=True):
         fizette = st.selectbox("Ki fizetett?", tagok)
         osszeg = st.number_input("Összeg (Ft):", min_value=0, step=100)
-        resztvevok = st.multiselect("Kiknek hozott ebédet? (A fizetőt is jelöld be!)", tagok, default=[fizette])
+        # 1. Módosítás: default=[] -> nincs alapértelmezett kiválasztott
+        resztvevok = st.multiselect("Kiknek hozott ebédet? (A fizetőt is jelöld be!)", tagok, default=[])
+        # 2. Módosítás: Naptár modul
+        ebed_datum = st.date_input("Mikor történt?", value=date.today())
         
         if st.form_submit_button("Ebéd rögzítése"):
             if osszeg > 0 and resztvevok:
@@ -222,7 +235,7 @@ with col1:
                     "resztvevok": resztvevok,
                     "kitol": "",
                     "kinek": "",
-                    "datum": datetime.now().strftime("%Y-%m-%d %H:%M")
+                    "datum": ebed_datum.strftime("%Y-%m-%d")
                 }
                 add_tranzakcio_to_sheets(uj_tr)
                 st.success("Ebéd elmentve a Google Táblázatba!")
@@ -242,6 +255,8 @@ with col2:
                 aktualis_visszafizetendo = nt["osszeg"]
         
         st.caption(f"Aktuális tartozás ({kitol} -> {kinek}): {aktualis_visszafizetendo:,} Ft".replace(",", " "))
+        # 2. Módosítás: Naptár modul tartozásrendezéshez is
+        torles_datum = st.date_input("Mikor történt a rendezés?", value=date.today())
         
         if st.form_submit_button("Tartozás nullázása / rendezése"):
             if kitol == kinek:
@@ -257,7 +272,7 @@ with col2:
                     "resztvevok": [],
                     "kitol": kitol,
                     "kinek": kinek,
-                    "datum": datetime.now().strftime("%Y-%m-%d %H:%M")
+                    "datum": torles_datum.strftime("%Y-%m-%d")
                 }
                 add_tranzakcio_to_sheets(uj_tr)
                 st.success(f"{kitol} -> {kinek} tartozás rendezve!")
@@ -279,7 +294,37 @@ if data["tranzakciok"]:
             st.caption(f"🕒 {tr['datum']} | 💸 **{tr['kitol']}** megadta a tartozását **{tr['kinek']}** részére (`{tr['osszeg']:,} Ft`)".replace(",", " "))
             megjelenitett += 1
             
-    if st.button("🗑️ Összes adat törlése (Alaphelyzet)"):
-        clear_all_tranzakciok_on_sheets()
-        st.success("Minden adat törölve a Google Táblázatból!")
-        st.rerun()
+    # --- 3. Módosítás: Összes adat törlése biztonsági kódos e-mail küldéssel ---
+    st.subheader("⚠️ Veszélyes zóna")
+    
+    # Ha nincs még aktív folyamat, mutassuk az indító gombot
+    if "delete_verification_code" not in st.session_state:
+        if st.button("🗑️ Összes adat törlése (Alaphelyzet)", type="primary"):
+            # Generálunk egy 6 jegyű kódot
+            code = str(random.randint(100000, 999999))
+            st.session_state.delete_verification_code = code
+            
+            # Elküldjük az e-mailt
+            with st.spinner("Ellenőrző kód küldése a cser.ferenc@dentalplus.hu címre..."):
+                if send_verification_email(code):
+                    st.success("Az ellenőrző kódot sikeresen elküldtük!")
+                    st.rerun()
+    else:
+        # Ha a kód már ki lett küldve, bekérjük
+        st.warning("Biztonsági megerősítés szükséges!")
+        beirt_kod = st.text_input("Írd be a cser.ferenc@dentalplus.hu címre küldött 6 jegyű ellenőrző kódot:", value="")
+        
+        col_ok, col_cancel = st.columns(2)
+        with col_ok:
+            if st.button("✅ Törlés véglegesítése", type="primary"):
+                if beirt_kod.strip() == st.session_state.delete_verification_code:
+                    clear_all_tranzakciok_on_sheets()
+                    del st.session_state.delete_verification_code
+                    st.success("Minden adat törölve a Google Táblázatból!")
+                    st.rerun()
+                else:
+                    st.error("Hibás biztonsági kód! Kérlek, próbáld újra.")
+        with col_cancel:
+            if st.button("❌ Mégsem"):
+                del st.session_state.delete_verification_code
+                st.rerun()
