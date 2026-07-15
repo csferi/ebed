@@ -133,7 +133,6 @@ for tr in data["tranzakciok"]:
         if fizette in matrix and resztvevok:
             ervenyes_resztvevok = [r for r in resztvevok if r in matrix]
             if ervenyes_resztvevok:
-                # MÓDOSÍTÁS: Az összeg most már közvetlenül adódik hozzá minden résztvevőhöz külön-külön
                 resz_osszeg = tr["osszeg"] 
                 for r in ervenyes_resztvevok:
                     if r != fizette:
@@ -207,7 +206,13 @@ if len(data["tagok"]) < 2:
 st.header("📊 Ki kinek mennyivel tartozik?")
 if netto_tartozasok:
     for t in netto_tartozasok:
-        st.markdown(f"🔴 **{t['kitol']}** tartozik **{t['kinek']}** részére:  `{t['osszeg']:,} Ft`".replace(",", " "))
+        # Nagyobb, formázott betűméret HTML használatával
+        formatted_osszeg = f"{t['osszeg']:,}".replace(",", " ")
+        st.markdown(
+            f"🔴 **{t['kitol']}** tartozik **{t['kinek']}** részére: "
+            f"<span style='font-size: 22px; font-weight: bold; color: #ff4b4b; background-color: #ffebeb; padding: 2px 8px; border-radius: 5px;'>{formatted_osszeg} Ft</span>", 
+            unsafe_allow_html=True
+        )
 else:
     st.success("🎉 Mindenki nullán van, nincs aktuális tartozás!")
 
@@ -220,7 +225,6 @@ with col1:
     st.subheader("🍱 Új ebéd beírása")
     with st.form("ebed_form", clear_on_submit=True):
         fizette = st.selectbox("Ki fizetett?", tagok)
-        # Az "Összeg" címkéjét is pontosítottam, hogy egyértelmű legyen
         osszeg = st.number_input("Adag ára / Fő (Ft):", min_value=0, step=100)
         resztvevok = st.multiselect("Kiknek hozott ebédet? (A fizetőt is jelöld be!)", tagok, default=[])
         ebed_datum = st.date_input("Mikor történt?", value=date.today())
@@ -231,7 +235,6 @@ with col1:
                     "id": datetime.now().timestamp(),
                     "tipus": "ebed",
                     "fizette": fizette,
-                    # Továbbra is az egy adag árát mentjük el, de a számolásnál már nem osztjuk el
                     "osszeg": osszeg,
                     "resztvevok": resztvevok,
                     "kitol": "",
@@ -288,7 +291,6 @@ if data["tranzakciok"]:
             break
         
         if tr["tipus"] == "ebed" and tr["fizette"] in tagok:
-            # Az előzményeknél is tisztázzuk a megjelenítést (megmutatjuk, hogy ez fejenkénti adag)
             st.caption(f"🕒 {tr['datum']} | **{tr['fizette']}** fizetett `{tr['osszeg']:,} Ft`/fő összeget. Résztvevők: {', '.join([r for r in tr['resztvevok'] if r in tagok])}".replace(",", " "))
             megjelenitett += 1
         elif tr["tipus"] == "torles" and tr["kitol"] in tagok and tr["kinek"] in tagok:
