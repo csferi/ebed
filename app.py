@@ -169,7 +169,7 @@ def van_tartozasa(tag):
             return True
     return False
 
-# --- 1. OLDALSÁV: Tagok kezelése ---
+# --- 1. OLDALSÁV: Tagok kezelése és az Elrejtett beállítások ---
 with st.sidebar:
     st.header("👥 Csapattagok kezelése")
     
@@ -198,6 +198,40 @@ with st.sidebar:
     else:
         st.write("Nincs törölhető tag.")
 
+    st.divider()
+
+    # --- ELREJTETT FUNKCIÓ (Az oldalsáv legalján egy unalmas menüben) ---
+    with st.expander("⚙️ Rendszerbeállítások"):
+        st.caption("Adatbázis karbantartási műveletek.")
+        
+        if "delete_verification_code" not in st.session_state:
+            if st.button("Adattáblák ürítése (Reset)", type="secondary"):
+                code = str(random.randint(100000, 999999))
+                st.session_state.delete_verification_code = code
+                
+                with st.spinner("Megerősítő kód küldése..."):
+                    if send_verification_email(code):
+                        st.success("A kódot elküldtük az adminisztrátornak.")
+                        st.rerun()
+        else:
+            st.warning("Megerősítés szükséges!")
+            beirt_kod = st.text_input("Írd be a kapott 6 jegyű ellenőrző kódot:", value="", type="password")
+            
+            col_ok, col_cancel = st.columns(2)
+            with col_ok:
+                if st.button("Végrehajtás", type="primary"):
+                    if beirt_kod.strip() == st.session_state.delete_verification_code:
+                        clear_all_tranzakciok_on_sheets()
+                        del st.session_state.delete_verification_code
+                        st.success("Sikeres törlés!")
+                        st.rerun()
+                    else:
+                        st.error("Hibás kód!")
+            with col_cancel:
+                if st.button("Mégsem"):
+                    del st.session_state.delete_verification_code
+                    st.rerun()
+
 if len(data["tagok"]) < 2:
     st.warning("Kérjük, vigyél fel legalább 2 tagot az oldalsávban a működéshez!")
     st.stop()
@@ -206,11 +240,10 @@ if len(data["tagok"]) < 2:
 st.header("📊 Ki kinek mennyivel tartozik?")
 if netto_tartozasok:
     for t in netto_tartozasok:
-        # A kiemelt piros doboz megmarad, mert ez asztali gépen és mobilon is kiválóan látszik
         formatted_osszeg = f"{t['osszeg']:,}".replace(",", " ")
         st.markdown(
             f"🔴 **{t['kitol']}** tartozik **{t['kinek']}** részére: "
-            f"<span style='font-size: 18px; font-weight: bold; color: #ff4b4b; background-color: #ffebeb; padding: 2px 8px; border-radius: 5px;'>{formatted_osszeg} Ft</span>", 
+            f"<span style='font-size: 22px; font-weight: bold; color: #ff4b4b; background-color: #ffebeb; padding: 2px 8px; border-radius: 5px;'>{formatted_osszeg} Ft</span>", 
             unsafe_allow_html=True
         )
 else:
@@ -293,8 +326,6 @@ if data["tranzakciok"]:
         formatted_osszeg = f"{tr['osszeg']:,}".replace(",", " ")
         
         if tr["tipus"] == "ebed" and tr["fizette"] in tagok:
-            # HTML helyett natív Markdown színezés (:green[szöveg]) és félkövérítés (**szöveg**)
-            # Ez garantálja, hogy mobilon is tökéletesen az alapértelmezett betűtípust használja a rendszer!
             st.markdown(
                 f"🕒 {tr['datum']} | **{tr['fizette']}** fizetett "
                 f"**:green[{formatted_osszeg} Ft]**/fő összeget. "
@@ -307,34 +338,3 @@ if data["tranzakciok"]:
                 f"(**:green[{formatted_osszeg} Ft]**)"
             )
             megjelenitett += 1
-            
-    # --- Összes adat törlése biztonsági kódos e-mail küldéssel ---
-    st.subheader("⚠️ Veszélyes zóna")
-    
-    if "delete_verification_code" not in st.session_state:
-        if st.button("🗑️ Összes adat törlése (Alaphelyzet)", type="primary"):
-            code = str(random.randint(100000, 999999))
-            st.session_state.delete_verification_code = code
-            
-            with st.spinner("Ellenőrző kód küldése a cser.ferenc@dentalplus.hu címre..."):
-                if send_verification_email(code):
-                    st.success("Az ellenőrző kódot sikeresen elküldtük!")
-                    st.rerun()
-    else:
-        st.warning("Biztonsági megerősítés szükséges!")
-        beirt_kod = st.text_input("Írd be a cser.ferenc@dentalplus.hu címre küldött 6 jegyű ellenőrző kódot:", value="")
-        
-        col_ok, col_cancel = st.columns(2)
-        with col_ok:
-            if st.button("✅ Törlés véglegesítése", type="primary"):
-                if beirt_kod.strip() == st.session_state.delete_verification_code:
-                    clear_all_tranzakciok_on_sheets()
-                    del st.session_state.delete_verification_code
-                    st.success("Minden adat törölve a Google Táblázatból!")
-                    st.rerun()
-                else:
-                    st.error("Hibás biztonsági kód! Kérlek, próbáld újra.")
-        with col_cancel:
-            if st.button("❌ Mégsem"):
-                del st.session_state.delete_verification_code
-                st.rerun()
